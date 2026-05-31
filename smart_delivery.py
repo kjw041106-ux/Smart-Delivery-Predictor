@@ -771,6 +771,23 @@ st.markdown(f"""
 # ──────────────────────────────────────────────
 st.markdown('<div class="section-header">📲 외부 연동 제어</div>', unsafe_allow_html=True)
 
+st.markdown("""
+<div style="text-align:center; margin-bottom:1rem;">
+    <a href="https://t.me/delivery_control_kr" target="_blank" style="
+        display:inline-block;
+        background: linear-gradient(135deg, #00e5ff22, #2196F322);
+        border: 1px solid #29b6f6;
+        color: #29b6f6;
+        font-family: 'Orbitron', monospace;
+        font-size: 0.8rem;
+        letter-spacing: 2px;
+        padding: 10px 24px;
+        border-radius: 8px;
+        text-decoration: none;
+    ">📱 텔레그램 채널 구독하기</a>
+</div>
+""", unsafe_allow_html=True)
+
 if st.button("📤 라이더 허브 & 고객 채널 데이터 전송"):
     payload = (
         f"🛵 [배달 관제 통보 v3.0 | {data_src}]\n"
