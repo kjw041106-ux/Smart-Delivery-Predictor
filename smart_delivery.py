@@ -303,7 +303,8 @@ def fetch_kma_asos(stn_id: int, target_date: datetime.date, target_hour: int, ap
     if target_date < datetime.date.today() - datetime.timedelta(days=1):
         return {"source": "FAILED", "error": "과거 데이터는 ASOS 미지원 — OpenMeteo 사용"}
 
-    tm_str = target_date.strftime("%Y%m%d") + f"{target_hour:02d}00"
+    # ✅ 기상청 ASOS는 관측시각+1시간으로 저장 (16시 관측값 → 1700으로 저장)
+    tm_str = target_date.strftime("%Y%m%d") + f"{(target_hour + 1) % 24:02d}00"
     url = "https://apihub.kma.go.kr/api/typ01/url/kma_sfctm2.php"
     params = {
         "tm": tm_str,
@@ -488,9 +489,10 @@ with st.spinner("🌐 기상청 ASOS 실시간 데이터 수집 중..."):
 
 # 데이터 소스 결정: KMA 성공 시 우선 사용, 실패 시 OpenMeteo fallback
 if kma_data.get("source") == "KMA_ASOS":
-    cur_rain  = kma_data["cur_rain"]
-    cur_wind  = kma_data["cur_wind"]
-    cur_vis   = kma_data["cur_vis"]
+    # ✅ ASOS 결측(0.0)이면 OpenMeteo값으로 보완
+    cur_rain  = kma_data["cur_rain"] if kma_data["cur_rain"] > 0.0 else om_data["cur_rain"]
+    cur_wind  = kma_data["cur_wind"] if kma_data["cur_wind"] > 0.0 else om_data["cur_wind"]
+    cur_vis   = kma_data["cur_vis"]  if kma_data["cur_vis"]  < 30.0 else om_data["cur_vis"]
     cur_snow  = kma_data["cur_snow"]
     data_src  = "KMA_ASOS"
     src_badge = '<span class="data-source-badge badge-kma">● 기상청 ASOS 실측</span>'
@@ -657,10 +659,9 @@ st.markdown('<div class="section-header">📊 24시간 강수량 추이</div>', 
 
 hours = list(range(24))
 
-# ASOS 실측값으로 선택 시간대 보정 (카드값과 차트값 일치)
+# 차트는 항상 OpenMeteo 고정 (ASOS 덮어쓰기 제거)
+# 카드값(cur_rain)은 ASOS 실측, 차트는 OpenMeteo로 역할 분리
 hourly_rain_chart = list(hourly_rain)
-if data_src == "KMA_ASOS":
-    hourly_rain_chart[selected_hour] = cur_rain
 
 fig = go.Figure()
 fig.add_trace(go.Bar(
