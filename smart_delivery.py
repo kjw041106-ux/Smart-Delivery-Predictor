@@ -364,13 +364,14 @@ def fetch_kma_asos(stn_id: int, target_date: datetime.date, target_hour: int, ap
 
 # ──────────────────────────────────────────────
 # Open-Meteo fallback (24시간 강수 차트용 포함)
+# ✅ 버그수정: 캐시는 날짜/지역 단위로만, 시간별 값은 캐시 밖에서 슬라이싱
 # ──────────────────────────────────────────────
-@st.cache_data(ttl=600)
-def fetch_openmeteo(lat, lon, target_date, target_hour):
-    today = datetime.date.today()
+@st.cache_data(ttl=3600)
+def fetch_openmeteo_daily(lat, lon, target_date, is_past: bool):
+    """하루치 24시간 데이터를 통째로 캐싱 — is_past를 밖에서 고정해서 전달"""
     base_url = (
         "https://archive-api.open-meteo.com/v1/archive"
-        if target_date < today else
+        if is_past else
         "https://api.open-meteo.com/v1/forecast"
     )
     params = {
@@ -384,24 +385,34 @@ def fetch_openmeteo(lat, lon, target_date, target_hour):
         r.raise_for_status()
         data = r.json()["hourly"]
         precip = [v if v is not None else 0.0 for v in data["precipitation"]]
-        wind   = data.get("windspeed_10m", [0.0] * 24)
-        vis    = data.get("visibility",    [10000] * 24)
-        snow   = data.get("snowfall",      [0.0] * 24)
-        return {
-            "hourly_rain": precip,
-            "max_rain":    round(max(precip), 1),
-            "cur_rain":    round(precip[target_hour], 2),
-            "cur_wind":    round(wind[target_hour] or 0, 1),
-            "cur_vis":     round((vis[target_hour] or 10000) / 1000, 1),
-            "cur_snow":    round(snow[target_hour] or 0, 1),
-            "source":      "OpenMeteo",
-        }
+        wind   = [v if v is not None else 0.0 for v in data.get("windspeed_10m", [0.0]*24)]
+        vis    = [v if v is not None else 10000 for v in data.get("visibility",   [10000]*24)]
+        snow   = [v if v is not None else 0.0 for v in data.get("snowfall",       [0.0]*24)]
+        return {"precip": precip, "wind": wind, "vis": vis, "snow": snow, "source": "OpenMeteo"}
     except Exception as e:
         return {
-            "hourly_rain": [0.0] * 24, "max_rain": 0.0,
-            "cur_rain": 0.0, "cur_wind": 0.0, "cur_vis": 10.0, "cur_snow": 0.0,
+            "precip": [0.0]*24, "wind": [0.0]*24,
+            "vis": [10000]*24,  "snow": [0.0]*24,
             "source": "FALLBACK", "error": str(e),
         }
+
+def fetch_openmeteo(lat, lon, target_date, target_hour):
+    """시간별 슬라이싱 — 캐시된 일별 데이터에서 뽑아씀"""
+    is_past = target_date < datetime.date.today()
+    daily = fetch_openmeteo_daily(lat, lon, target_date, is_past)
+    precip = daily["precip"]
+    wind   = daily["wind"]
+    vis    = daily["vis"]
+    snow   = daily["snow"]
+    return {
+        "hourly_rain": precip,
+        "max_rain":    round(max(precip), 1),
+        "cur_rain":    round(precip[target_hour], 2),
+        "cur_wind":    round(wind[target_hour], 1),
+        "cur_vis":     round(vis[target_hour] / 1000, 1),
+        "cur_snow":    round(snow[target_hour], 1),
+        "source":      daily["source"],
+    }
 
 
 # ──────────────────────────────────────────────
@@ -763,7 +774,7 @@ st.markdown('<div class="section-header">🤖 AI 종합 분석 리포트</div>',
 # 규칙 기반 자동 리포트 (API 키 불필요)
 if risk >= 70:
     situation = f"🚨 현재 {selected_location} 지역은 강수량 {cur_rain}mm/h, 하천수위 {river}m로 라이더 안전이 심각하게 위협받고 있습니다. 즉각적인 배달 중단을 권고합니다."
-    rider_guide = "⛔ 라이더 권고: 즉시 안전한 장소로 대피하세요. 침수 예상 구역 {flooded}곳을 반드시 우회하고, 교량 및 저지대 진입을 금지합니다."
+    rider_guide = f"⛔ 라이더 권고: 즉시 안전한 장소로 대피하세요. 침수 예상 구역 {flooded}곳을 반드시 우회하고, 교량 및 저지대 진입을 금지합니다."
     customer_msg = "📦 고객 안내: 현재 기상 악화로 배달이 일시 중단될 수 있습니다. 안전을 위해 배달 취소를 권장드립니다."
 elif risk >= 40:
     situation = f"⚡ {selected_location} 지역 기상이 악화되고 있습니다. 강수량 {cur_rain}mm/h, 하천수위 {river}m로 주의가 필요합니다."
@@ -805,7 +816,7 @@ st.markdown("""
 
 if st.button("📤 라이더 허브 & 고객 채널 데이터 전송"):
     payload = (
-        f"🛵 [배달 관제 통보 v3.0 | {data_src}]\n"
+        f"🛵 [배달 관제 통보 | {data_src}]\n"
         f"📍 {selected_location} | {selected_date} {selected_hour:02d}시\n"
         f"🌧️ 강수: {cur_rain}mm/h | 💨 풍속: {cur_wind}km/h\n"
         f"🌊 수위: {river}m ({river_source}) | 🚧 침수구역: {flooded}곳\n"
